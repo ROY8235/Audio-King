@@ -5,20 +5,18 @@ import shutil
 import uuid
 import zipfile
 import PyPDF2
+from pydub import AudioSegment
 import random
-from telegram import Update, Bot, InputFile, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder,
-    ContextTypes,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    filters
+    ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler,
+    CallbackQueryHandler, filters
 )
 import edge_tts
 from flask import Flask
 import threading
-from moviepy.editor import AudioFileClip, CompositeAudioClip
+import warnings
+warnings.filterwarnings("ignore", category=SyntaxWarning)
 
 # ======================
 # 🔧 CONFIGURATION
@@ -34,20 +32,16 @@ TEMP_FOLDER = "temp_audio"
 BG_MUSIC_FOLDER = "bg_music"
 TOPIC_MAP_PATH = "config/stories.json"
 
-# Create directories
 for folder in [STORIES_FOLDER, UPLOADS_FOLDER, SUCCESS_FOLDER, TEMP_FOLDER, "config"]:
     os.makedirs(folder, exist_ok=True)
 
-# Flask app
 app = Flask(__name__)
 
 @app.route('/')
 def health_check():
     return "Audio King is alive!", 200
 
-# ======================
-# 🛠️ UTILITIES
-# ======================
+# =============== Utilities ===============
 def ensure_json_file(path, default_data=None):
     if not os.path.exists(path):
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -60,9 +54,6 @@ def save_json(path, data):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
-# ======================
-# 📄 FILE PROCESSING
-# ======================
 def extract_number(filename):
     import re
     match = re.search(r'\d+', filename)
@@ -100,9 +91,9 @@ def detect_genre(text):
         return "horror"
     elif any(word in text for word in ["प्यार", "आँखें", "धड़कन", "रिश्ता", "चूड़ी"]):
         return "romantic"
-    elif any(word in text for word in ["तलवार", "गोलियां", "बम", "हमला", "लड़ाई"]):
+    elif any(word in text for word in ["\u0924लवार", "\u0917ोलि\u092f\u093e\u0902", "\u092c\u092e", "\u0939\u092e\u0932\u093e", "\u0932\u095c\u093e\u0908"]):
         return "action"
-    elif any(word in text for word in ["राज", "भविष्य", "ग्रह", "यात्रा", "वैज्ञानिक"]):
+    elif any(word in text for word in ["\u0930\u093e\u091c", "\u092d\u0935\u093f\u0937\u094d\u092f", "\u0917\u094d\u0930\u0939", "\u092f\u093e\u0924\u094d\u0930\u093e", "\u0935\u0948\u091c\u094d\u091e\u093e\u0928\u093f\u0915"]):
         return "sci-fi"
     return "default"
 
@@ -124,22 +115,40 @@ async def safe_tts(text, output_path, retries=3):
             await asyncio.sleep(2)
     return False
 
-async def text_to_audio_chunks(text: str, max_chars=4000) -> list:
-    chunks = []
-    buffer = ""
-    for line in text.splitlines():
-        if len(buffer) + len(line) > max_chars:
-            if buffer.strip():
-                output_path = os.path.join(TEMP_FOLDER, f"{uuid.uuid4().hex}.mp3")
-                if await safe_tts(buffer.strip(), output_path):
-                    chunks.append(output_path)
-            buffer = line
-        else:
-            buffer += "\n" + line
-    if buffer.strip():
-        output_path = os.path.join(TEMP_FOLDER, f"{uuid.uuid4().hex}.mp3")
-        if await safe_tts(buffer.strip(), output_path):
-            chunks.append(output_path)
-    return chunks
+# ======================
+# 🧰 MAIN FUNCTION
+# ======================
+async def main():
+    from audio_king_core import *  # You can remove this and inline your bot logic if needed
 
-# ✅ Pydub हटाया गया और MoviePy जोड़ दिया गया — अब ये Render-compatible और Python 3.13-ready है
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    await app.bot.set_my_commands([
+        BotCommand("start", "Start the bot and get info"),
+        BotCommand("upload_file", "Upload ZIP/PDF/text files (Owner only)")
+    ])
+
+    # Add your bot handlers here like CommandHandler("start", start)
+    # Example: app.add_handler(CommandHandler("start", start))
+
+    app.job_queue.run_repeating(clean_success_folder, interval=300, first=0)
+    app.job_queue.run_repeating(monitor_uploads, interval=5, first=0)
+
+    print("🚀 Audio King Bot Started")
+    await app.run_polling()
+
+# =============== Run Flask for Render ===============
+def run_flask():
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
+
+if __name__ == "__main__":
+    import nest_asyncio
+    nest_asyncio.apply()
+
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        print("Bot stopped.")
