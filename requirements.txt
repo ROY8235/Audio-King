@@ -2,7 +2,7 @@ python-telegram-bot==20.7
 edge-tts==7.0.2
 flask==3.1.1
 PyPDF2==3.0.1
-pydub==0.25.1
+moviepy==1.0.3
 nest-asyncio==1.6.0
 aiohttp==3.12.14
 APScheduler==3.10.4
