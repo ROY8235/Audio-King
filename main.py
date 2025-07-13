@@ -5,7 +5,6 @@ import shutil
 import uuid
 import zipfile
 import PyPDF2
-from pydub import AudioSegment
 import random
 from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -15,8 +14,8 @@ from telegram.ext import (
 import edge_tts
 from flask import Flask
 import threading
-import warnings
-warnings.filterwarnings("ignore", category=SyntaxWarning)
+from audio_king_core import *  # ✅ Your handlers must be defined in this file
+from moviepy.editor import AudioFileClip, concatenate_audioclips
 
 # ======================
 # 🔧 CONFIGURATION
@@ -41,7 +40,7 @@ app = Flask(__name__)
 def health_check():
     return "Audio King is alive!", 200
 
-# =============== Utilities ===============
+# Utilities
 def ensure_json_file(path, default_data=None):
     if not os.path.exists(path):
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -91,9 +90,9 @@ def detect_genre(text):
         return "horror"
     elif any(word in text for word in ["प्यार", "आँखें", "धड़कन", "रिश्ता", "चूड़ी"]):
         return "romantic"
-    elif any(word in text for word in ["\u0924लवार", "\u0917ोलि\u092f\u093e\u0902", "\u092c\u092e", "\u0939\u092e\u0932\u093e", "\u0932\u095c\u093e\u0908"]):
+    elif any(word in text for word in ["तलवार", "गोलियां", "बम", "हमला", "लड़ाई"]):
         return "action"
-    elif any(word in text for word in ["\u0930\u093e\u091c", "\u092d\u0935\u093f\u0937\u094d\u092f", "\u0917\u094d\u0930\u0939", "\u092f\u093e\u0924\u094d\u0930\u093e", "\u0935\u0948\u091c\u094d\u091e\u093e\u0928\u093f\u0915"]):
+    elif any(word in text for word in ["राज", "भविष्य", "ग्रह", "यात्रा", "वैज्ञानिक"]):
         return "sci-fi"
     return "default"
 
@@ -115,12 +114,18 @@ async def safe_tts(text, output_path, retries=3):
             await asyncio.sleep(2)
     return False
 
-# ======================
-# 🧰 MAIN FUNCTION
-# ======================
-async def main():
-    from audio_king_core import *  # You can remove this and inline your bot logic if needed
+def mix_audio_with_music(voice_path, music_path, output_path):
+    try:
+        voice_clip = AudioFileClip(voice_path)
+        music_clip = AudioFileClip(music_path).volumex(0.2).subclip(0, voice_clip.duration)
+        final_audio = voice_clip.audio.set_audio(music_clip)
+        final_audio.write_audiofile(output_path)
+        voice_clip.close()
+        music_clip.close()
+    except Exception as e:
+        print(f"Audio mix error: {e}")
 
+async def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     await app.bot.set_my_commands([
@@ -128,8 +133,11 @@ async def main():
         BotCommand("upload_file", "Upload ZIP/PDF/text files (Owner only)")
     ])
 
-    # Add your bot handlers here like CommandHandler("start", start)
-    # Example: app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("upload_file", upload_file))
+    app.add_handler(MessageHandler(filters.Document.ALL & ~filters.COMMAND, upload_file))
+    app.add_handler(CallbackQueryHandler(destination_callback, pattern="dest_"))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=OWNER_ID), handle_destination_input))
 
     app.job_queue.run_repeating(clean_success_folder, interval=300, first=0)
     app.job_queue.run_repeating(monitor_uploads, interval=5, first=0)
@@ -137,7 +145,6 @@ async def main():
     print("🚀 Audio King Bot Started")
     await app.run_polling()
 
-# =============== Run Flask for Render ===============
 def run_flask():
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
 
