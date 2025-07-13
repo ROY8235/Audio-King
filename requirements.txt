@@ -1,0 +1,7 @@
+python-telegram-bot[job-queue]==20.7
+pydub
+edge-tts
+PyPDF2
+nest-asyncio
+telegram
+flask
