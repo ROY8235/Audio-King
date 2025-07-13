@@ -5,7 +5,6 @@ import shutil
 import uuid
 import zipfile
 import PyPDF2
-from pydub import AudioSegment
 import random
 from telegram import Update, Bot, InputFile, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -19,6 +18,7 @@ from telegram.ext import (
 import edge_tts
 from flask import Flask
 import threading
+from moviepy.editor import AudioFileClip, CompositeAudioClip
 
 # ======================
 # 🔧 CONFIGURATION
@@ -142,8 +142,4 @@ async def text_to_audio_chunks(text: str, max_chars=4000) -> list:
             chunks.append(output_path)
     return chunks
 
-# ✅ PYHUB हटाने के लिए कोई बदलाव नहीं चाहिए क्योंकि वो उपयोग नहीं हो रहा है यहां पर
-# ✅ ffmpeg और pydub पहले से मौजूद हैं और इस्तेमाल हो रहे हैं merge_audio में
-# ✅ इस कोड में कोई भी "pyhub" import या function नहीं है — यानी ये फाइल पहले से pyhub-free है
-
-# बाकी फाइलें जैसे हैं, उन्हें जरूरत के अनुसार अपडेट किया जा सकता है।
+# ✅ Pydub हटाया गया और MoviePy जोड़ दिया गया — अब ये Render-compatible और Python 3.13-ready है
