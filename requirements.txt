@@ -4,3 +4,4 @@ PyPDF2
 nest-asyncio
 telegram
 flask
+pydub
