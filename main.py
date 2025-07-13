@@ -6,8 +6,8 @@ import uuid
 import zipfile
 import PyPDF2
 import random
-from moviepy.editor import AudioFileClip, concatenate_audioclips, CompositeAudioClip
-from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
+from moviepy.editor import AudioFileClip, CompositeAudioClip
+from telegram import Update, BotCommand
 from telegram.ext import (
     ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler,
     CallbackQueryHandler, filters
@@ -109,15 +109,15 @@ def merge_audio(tts_path, bg_music_path, output_path):
 # ========== TELEGRAM HANDLERS ==========
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👑 Welcome to Audio King!\nSend PDF, ZIP, or TXT to start.")
+    await update.message.reply_text("\U0001F451 Welcome to Audio King!\nSend PDF, ZIP, or TXT to start.")
 
 async def upload_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
-        return await update.message.reply_text("❌ Access Denied.")
+        return await update.message.reply_text("\u274C Access Denied.")
 
     doc = update.message.document
     if not doc:
-        return await update.message.reply_text("⚠️ No file received.")
+        return await update.message.reply_text("\u26A0\uFE0F No file received.")
 
     file_id = doc.file_id
     file = await context.bot.get_file(file_id)
@@ -125,12 +125,12 @@ async def upload_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     temp_file = os.path.join(UPLOADS_FOLDER, f"{uuid.uuid4().hex}{ext}")
     await file.download_to_drive(temp_file)
     context.user_data["pending_file"] = temp_file
-    await update.message.reply_text("✅ File uploaded. Now send story name.")
+    await update.message.reply_text("\u2705 File uploaded. Now send story name.")
 
 async def handle_destination_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     story_name = update.message.text.strip()
     if "pending_file" not in context.user_data:
-        return await update.message.reply_text("⚠️ No file to assign. Upload a file first.")
+        return await update.message.reply_text("\u26A0\uFE0F No file to assign. Upload a file first.")
 
     file_path = context.user_data["pending_file"]
     ext = os.path.splitext(file_path)[-1].lower()
@@ -145,18 +145,17 @@ async def handle_destination_input(update: Update, context: ContextTypes.DEFAULT
         shutil.copy(file_path, os.path.join(subfolder, f"{story_name}_1.txt"))
         result = [f"{story_name}_1.txt"]
     else:
-        return await update.message.reply_text("❌ Unsupported file format.")
+        return await update.message.reply_text("\u274C Unsupported file format.")
 
     if result:
-        await update.message.reply_text(f"🎉 Story '{story_name}' saved with {len(result)} chapter(s)!")
+        await update.message.reply_text(f"\U0001F389 Story '{story_name}' saved with {len(result)} chapter(s)!")
     else:
-        await update.message.reply_text("❌ Failed to process the story.")
+        await update.message.reply_text("\u274C Failed to process the story.")
 
     del context.user_data["pending_file"]
     shutil.move(file_path, os.path.join(SUCCESS_FOLDER, os.path.basename(file_path)))
 
-async def destination_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer("Clicked.")
+# ========== SCHEDULERS ==========
 
 async def clean_success_folder(context: ContextTypes.DEFAULT_TYPE):
     for file in os.listdir(SUCCESS_FOLDER):
@@ -166,27 +165,28 @@ async def clean_success_folder(context: ContextTypes.DEFAULT_TYPE):
             continue
 
 async def monitor_uploads(context: ContextTypes.DEFAULT_TYPE):
-    pass  # Placeholder
+    pass  # Future Feature
 
-# ========== MAIN SETUP ==========
+# ========== BOT RUNNER ==========
+
 async def main():
-    app_telegram = ApplicationBuilder().token(BOT_TOKEN).build()
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    await app_telegram.bot.set_my_commands([
+    await application.bot.set_my_commands([
         BotCommand("start", "Start the bot"),
         BotCommand("upload_file", "Upload a story (zip/pdf/txt)")
     ])
 
-    app_telegram.add_handler(CommandHandler("start", start))
-    app_telegram.add_handler(CommandHandler("upload_file", upload_file))
-    app_telegram.add_handler(MessageHandler(filters.Document.ALL & ~filters.COMMAND, upload_file))
-    app_telegram.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=OWNER_ID), handle_destination_input))
-    app_telegram.add_handler(CallbackQueryHandler(destination_callback, pattern="dest_"))
-    app_telegram.job_queue.run_repeating(clean_success_folder, interval=300, first=0)
-    app_telegram.job_queue.run_repeating(monitor_uploads, interval=5, first=0)
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.Document.ALL & ~filters.COMMAND, upload_file))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=OWNER_ID), handle_destination_input))
+    application.job_queue.run_repeating(clean_success_folder, interval=300, first=0)
+    application.job_queue.run_repeating(monitor_uploads, interval=10, first=10)
 
-    print("✅ Bot is running!")
-    await app_telegram.run_polling()
+    print("\u2705 Bot is running!")
+    await application.run_polling()
+
+# ========== FLASK RUNNER ==========
 
 def run_flask():
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
@@ -196,8 +196,7 @@ if __name__ == "__main__":
     nest_asyncio.apply()
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
-
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        print("🛑 Bot stopped.")
+        print("\U0001F6D1 Bot stopped.")
