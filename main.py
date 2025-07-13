@@ -6,7 +6,7 @@ import uuid
 import zipfile
 import PyPDF2
 import random
-from moviepy.editor import AudioFileClip, concatenate_audioclips
+from moviepy.editor import AudioFileClip, concatenate_audioclips, CompositeAudioClip
 from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler,
@@ -72,7 +72,7 @@ def detect_genre(text):
         return "horror"
     elif any(word in text for word in ["प्यार", "आँखें", "धड़कन", "रिश्ता", "चूड़ी"]):
         return "romantic"
-    elif any(word in text for word in ["तलवार", "गोलियां", "बम", "हमला", "लड़ाई"]):
+    elif any(word in text for word in ["तलवार", "गोलियां", "बम", "हमला", "लड़ाई"]):
         return "action"
     elif any(word in text for word in ["राज", "भविष्य", "ग्रह", "यात्रा", "वैज्ञानिक"]):
         return "sci-fi"
@@ -99,9 +99,8 @@ def merge_audio(tts_path, bg_music_path, output_path):
     try:
         voice = AudioFileClip(tts_path)
         bg = AudioFileClip(bg_music_path).subclip(0, voice.duration).volumex(0.2)
-        final = voice.audio.set_duration(voice.duration).volumex(1.0).fx(lambda c: c)
-        output = final.set_audio(bg)
-        output.write_audiofile(output_path)
+        mixed = CompositeAudioClip([bg, voice]).set_duration(voice.duration)
+        mixed.write_audiofile(output_path, codec='libmp3lame')
         return True
     except Exception as e:
         print(f"Error merging: {e}")
@@ -171,23 +170,23 @@ async def monitor_uploads(context: ContextTypes.DEFAULT_TYPE):
 
 # ========== MAIN SETUP ==========
 async def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app_telegram = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    await app.bot.set_my_commands([
+    await app_telegram.bot.set_my_commands([
         BotCommand("start", "Start the bot"),
         BotCommand("upload_file", "Upload a story (zip/pdf/txt)")
     ])
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("upload_file", upload_file))
-    app.add_handler(MessageHandler(filters.Document.ALL & ~filters.COMMAND, upload_file))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=OWNER_ID), handle_destination_input))
-    app.add_handler(CallbackQueryHandler(destination_callback, pattern="dest_"))
-    app.job_queue.run_repeating(clean_success_folder, interval=300, first=0)
-    app.job_queue.run_repeating(monitor_uploads, interval=5, first=0)
+    app_telegram.add_handler(CommandHandler("start", start))
+    app_telegram.add_handler(CommandHandler("upload_file", upload_file))
+    app_telegram.add_handler(MessageHandler(filters.Document.ALL & ~filters.COMMAND, upload_file))
+    app_telegram.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=OWNER_ID), handle_destination_input))
+    app_telegram.add_handler(CallbackQueryHandler(destination_callback, pattern="dest_"))
+    app_telegram.job_queue.run_repeating(clean_success_folder, interval=300, first=0)
+    app_telegram.job_queue.run_repeating(monitor_uploads, interval=5, first=0)
 
     print("✅ Bot is running!")
-    await app.run_polling()
+    await app_telegram.run_polling()
 
 def run_flask():
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
