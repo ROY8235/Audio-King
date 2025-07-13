@@ -6,6 +6,7 @@ import uuid
 import zipfile
 import PyPDF2
 import random
+from moviepy.editor import AudioFileClip, concatenate_audioclips
 from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler,
@@ -14,16 +15,12 @@ from telegram.ext import (
 import edge_tts
 from flask import Flask
 import threading
-from audio_king_core import *  # ✅ Your handlers must be defined in this file
-from moviepy.editor import AudioFileClip, concatenate_audioclips
 
-# ======================
-# 🔧 CONFIGURATION
-# ======================
-BOT_TOKEN = os.getenv("BOT_TOKEN", "7592009800:AAE9OMzv9cHG7bl-lPAh_Nb8iGJL1rT6XE0")
-OWNER_ID = int(os.getenv("OWNER_ID", 8169917040))
-OWNER_NAME = "Ruders"
-BOT_USERNAME = "i_am_raghavbot"
+# ========== CONFIGURATION ==========
+BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN")
+OWNER_ID = int(os.getenv("OWNER_ID", 1234567890))
+BOT_USERNAME = "your_bot_username"
+OWNER_NAME = "Owner"
 STORIES_FOLDER = "stories"
 UPLOADS_FOLDER = "uploads"
 SUCCESS_FOLDER = "success"
@@ -34,25 +31,14 @@ TOPIC_MAP_PATH = "config/stories.json"
 for folder in [STORIES_FOLDER, UPLOADS_FOLDER, SUCCESS_FOLDER, TEMP_FOLDER, "config"]:
     os.makedirs(folder, exist_ok=True)
 
+# ========== FLASK ==========
 app = Flask(__name__)
 
 @app.route('/')
 def health_check():
     return "Audio King is alive!", 200
 
-# Utilities
-def ensure_json_file(path, default_data=None):
-    if not os.path.exists(path):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(default_data or {}, f)
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-def save_json(path, data):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-
+# ========== UTILITY FUNCTIONS ==========
 def extract_number(filename):
     import re
     match = re.search(r'\d+', filename)
@@ -71,11 +57,7 @@ def process_pdf(file_path, story_name):
     try:
         with open(file_path, 'rb') as file:
             pdf = PyPDF2.PdfReader(file)
-            text = ""
-            for page in pdf.pages:
-                extracted_text = page.extract_text()
-                if extracted_text:
-                    text += extracted_text + "\n"
+            text = "\n".join([page.extract_text() for page in pdf.pages if page.extract_text()])
             output_path = os.path.join(subfolder, f"{story_name}_1.txt")
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(text)
@@ -98,9 +80,8 @@ def detect_genre(text):
 
 def get_bg_music_path(genre):
     folder = os.path.join(BG_MUSIC_FOLDER, genre)
-    if not os.path.exists(folder):
-        return None
-    files = [f for f in os.listdir(folder) if f.endswith('.mp3') or f.endswith('.wav')]
+    if not os.path.exists(folder): return None
+    files = [f for f in os.listdir(folder) if f.endswith('.mp3')]
     return os.path.join(folder, random.choice(files)) if files else None
 
 async def safe_tts(text, output_path, retries=3):
@@ -114,35 +95,98 @@ async def safe_tts(text, output_path, retries=3):
             await asyncio.sleep(2)
     return False
 
-def mix_audio_with_music(voice_path, music_path, output_path):
+def merge_audio(tts_path, bg_music_path, output_path):
     try:
-        voice_clip = AudioFileClip(voice_path)
-        music_clip = AudioFileClip(music_path).volumex(0.2).subclip(0, voice_clip.duration)
-        final_audio = voice_clip.audio.set_audio(music_clip)
-        final_audio.write_audiofile(output_path)
-        voice_clip.close()
-        music_clip.close()
+        voice = AudioFileClip(tts_path)
+        bg = AudioFileClip(bg_music_path).subclip(0, voice.duration).volumex(0.2)
+        final = voice.audio.set_duration(voice.duration).volumex(1.0).fx(lambda c: c)
+        output = final.set_audio(bg)
+        output.write_audiofile(output_path)
+        return True
     except Exception as e:
-        print(f"Audio mix error: {e}")
+        print(f"Error merging: {e}")
+        return False
 
+# ========== TELEGRAM HANDLERS ==========
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("👑 Welcome to Audio King!\nSend PDF, ZIP, or TXT to start.")
+
+async def upload_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        return await update.message.reply_text("❌ Access Denied.")
+
+    doc = update.message.document
+    if not doc:
+        return await update.message.reply_text("⚠️ No file received.")
+
+    file_id = doc.file_id
+    file = await context.bot.get_file(file_id)
+    ext = os.path.splitext(doc.file_name)[-1]
+    temp_file = os.path.join(UPLOADS_FOLDER, f"{uuid.uuid4().hex}{ext}")
+    await file.download_to_drive(temp_file)
+    context.user_data["pending_file"] = temp_file
+    await update.message.reply_text("✅ File uploaded. Now send story name.")
+
+async def handle_destination_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    story_name = update.message.text.strip()
+    if "pending_file" not in context.user_data:
+        return await update.message.reply_text("⚠️ No file to assign. Upload a file first.")
+
+    file_path = context.user_data["pending_file"]
+    ext = os.path.splitext(file_path)[-1].lower()
+
+    if ext == ".zip":
+        result = process_zip(file_path, story_name)
+    elif ext == ".pdf":
+        result = process_pdf(file_path, story_name)
+    elif ext == ".txt":
+        subfolder = os.path.join(STORIES_FOLDER, story_name)
+        os.makedirs(subfolder, exist_ok=True)
+        shutil.copy(file_path, os.path.join(subfolder, f"{story_name}_1.txt"))
+        result = [f"{story_name}_1.txt"]
+    else:
+        return await update.message.reply_text("❌ Unsupported file format.")
+
+    if result:
+        await update.message.reply_text(f"🎉 Story '{story_name}' saved with {len(result)} chapter(s)!")
+    else:
+        await update.message.reply_text("❌ Failed to process the story.")
+
+    del context.user_data["pending_file"]
+    shutil.move(file_path, os.path.join(SUCCESS_FOLDER, os.path.basename(file_path)))
+
+async def destination_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer("Clicked.")
+
+async def clean_success_folder(context: ContextTypes.DEFAULT_TYPE):
+    for file in os.listdir(SUCCESS_FOLDER):
+        try:
+            os.remove(os.path.join(SUCCESS_FOLDER, file))
+        except:
+            continue
+
+async def monitor_uploads(context: ContextTypes.DEFAULT_TYPE):
+    pass  # Placeholder
+
+# ========== MAIN SETUP ==========
 async def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     await app.bot.set_my_commands([
-        BotCommand("start", "Start the bot and get info"),
-        BotCommand("upload_file", "Upload ZIP/PDF/text files (Owner only)")
+        BotCommand("start", "Start the bot"),
+        BotCommand("upload_file", "Upload a story (zip/pdf/txt)")
     ])
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("upload_file", upload_file))
     app.add_handler(MessageHandler(filters.Document.ALL & ~filters.COMMAND, upload_file))
-    app.add_handler(CallbackQueryHandler(destination_callback, pattern="dest_"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(user_id=OWNER_ID), handle_destination_input))
-
+    app.add_handler(CallbackQueryHandler(destination_callback, pattern="dest_"))
     app.job_queue.run_repeating(clean_success_folder, interval=300, first=0)
     app.job_queue.run_repeating(monitor_uploads, interval=5, first=0)
 
-    print("🚀 Audio King Bot Started")
+    print("✅ Bot is running!")
     await app.run_polling()
 
 def run_flask():
@@ -151,11 +195,10 @@ def run_flask():
 if __name__ == "__main__":
     import nest_asyncio
     nest_asyncio.apply()
-
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
 
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        print("Bot stopped.")
+        print("🛑 Bot stopped.")
