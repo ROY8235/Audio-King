@@ -2,7 +2,7 @@ import asyncio
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 
-BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"  # 🔁 अपना बॉट टोकन यहां डालो
+BOT_TOKEN = "7592009800:AAE9OMzv9cHG7bl-lPAh_Nb8iGJL1rT6XE0"  # 🔁 अपना बॉट टोकन यहां डालो
 
 # 📍 /start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
